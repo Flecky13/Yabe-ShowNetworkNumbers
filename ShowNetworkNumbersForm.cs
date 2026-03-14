@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO.BACnet;
 using System.Linq;
 using System.Reflection;
@@ -80,8 +81,10 @@ namespace ShowNetworkNumbers
                 WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
                 BackColor = Color.Transparent,
-                Padding = new Padding(8)
+                Padding = new Padding(4)
             };
+            _routerRowPanel.Paint += RouterRowPanel_Paint;
+            _routerRowPanel.Resize += (sender, args) => _routerRowPanel.Invalidate();
 
             _diagramHostPanel.Controls.Add(_routerRowPanel);
 
@@ -99,14 +102,21 @@ namespace ShowNetworkNumbers
                 .OrderBy(d => d.deviceId)
                 .ToList();
 
-            foreach (BACnetDevice device in devices)
-            {
-                string macAddress = GetMacAddress(device);
-                SnetResolution snetResolution = ResolveSnet(device, macAddress);
-                int? snetNumber = snetResolution.Value;
-                string snetText = snetNumber.HasValue ? snetNumber.Value.ToString() : "n/a";
-                _routerRowPanel.Controls.Add(CreateRouterCard(device, macAddress, snetText));
-            }
+            List<DeviceLayoutData> layoutDevices = devices
+                .Select(CreateDeviceLayoutData)
+                .OrderBy(d => d.RouterKey)
+                .ThenBy(d => d.DeviceId)
+                .ToList();
+
+            IEnumerable<IGrouping<string, DeviceLayoutData>> routerGroups = layoutDevices
+                .GroupBy(d => d.RouterKey)
+                .OrderBy(g => g.Key);
+
+            foreach (IGrouping<string, DeviceLayoutData> routerGroup in routerGroups)
+                _routerRowPanel.Controls.Add(CreateRouterGroupControl(routerGroup));
+
+            _routerRowPanel.PerformLayout();
+            _routerRowPanel.Invalidate();
 
             _lastDebugDump = BuildDebugDump(devices);
 
@@ -123,30 +133,325 @@ namespace ShowNetworkNumbers
             }
         }
 
+        private DeviceLayoutData CreateDeviceLayoutData(BACnetDevice device)
+        {
+            string macAddress = GetMacAddress(device);
+            SnetResolution snetResolution = ResolveSnet(device, macAddress);
+            int? snetNumber = snetResolution.Value;
+
+            return new DeviceLayoutData
+            {
+                Device = device,
+                DeviceId = device != null ? device.deviceId : uint.MaxValue,
+                RouterKey = GetRouterKeyAddress(device),
+                DisplayMac = macAddress,
+                Snet = snetNumber,
+                SnetText = snetNumber.HasValue ? snetNumber.Value.ToString() : "n/a"
+            };
+        }
+
+        private Control CreateRouterGroupControl(IGrouping<string, DeviceLayoutData> routerGroup)
+        {
+            List<DeviceLayoutData> groupDevices = routerGroup
+                .OrderBy(d => d.DeviceId)
+                .ToList();
+
+            DeviceLayoutData routerDevice = groupDevices
+                .FirstOrDefault(d => !d.Snet.HasValue)
+                ?? groupDevices.FirstOrDefault();
+
+            FlowLayoutPanel groupPanel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                BackColor = Color.Transparent,
+                Margin = new Padding(4),
+                Padding = new Padding(8)
+            };
+            groupPanel.Paint += RouterGroupPanel_Paint;
+            groupPanel.Resize += (sender, args) => groupPanel.Invalidate();
+
+            FlowLayoutPanel contentPanel = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(0, 0, 0, 0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+
+            if (routerDevice != null)
+            {
+                Control routerCard = CreateRouterCard(routerDevice.Device, routerDevice.DisplayMac, routerDevice.SnetText);
+                routerCard.Tag = "router-card";
+                contentPanel.Controls.Add(routerCard);
+            }
+
+            FlowLayoutPanel columnsRow = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = new Padding(0, 6, 0, 0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+
+            List<DeviceLayoutData> childDevices = groupDevices
+                .Where(d => routerDevice == null || d.DeviceId != routerDevice.DeviceId)
+                .ToList();
+
+            List<DeviceLayoutData> withoutSnet = childDevices.Where(d => !d.Snet.HasValue).ToList();
+            if (withoutSnet.Count > 0)
+                columnsRow.Controls.Add(CreateSnetColumn("n/a", withoutSnet));
+
+            IEnumerable<IGrouping<int, DeviceLayoutData>> snetGroups = childDevices
+                .Where(d => d.Snet.HasValue)
+                .GroupBy(d => d.Snet.Value)
+                .OrderBy(g => g.Key);
+
+            foreach (IGrouping<int, DeviceLayoutData> snetGroup in snetGroups)
+                columnsRow.Controls.Add(CreateSnetColumn(snetGroup.Key.ToString(), snetGroup.OrderBy(d => d.DeviceId).ToList()));
+
+            if (columnsRow.Controls.Count > 0)
+            {
+                columnsRow.Tag = "columns-row";
+                contentPanel.Controls.Add(columnsRow);
+            }
+
+            groupPanel.Controls.Add(contentPanel);
+            return groupPanel;
+        }
+
+        private Control CreateSnetColumn(string title, List<DeviceLayoutData> devices)
+        {
+            FlowLayoutPanel column = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(0, 0, 8, 0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+
+            Label titleLabel = new Label
+            {
+                AutoSize = false,
+                Width = 102,
+                Height = 20,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 8F, FontStyle.Bold),
+                Margin = new Padding(0, 0, 0, 2),
+                Text = "Netzwerk: " + title
+            };
+            titleLabel.Tag = "snet-label";
+
+            FlowLayoutPanel cards = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+
+            foreach (DeviceLayoutData device in devices)
+            {
+                Control childCard = CreateRouterCard(device.Device, device.DisplayMac, device.SnetText);
+                childCard.Tag = "child-card";
+                cards.Controls.Add(childCard);
+            }
+
+            column.Controls.Add(titleLabel);
+            column.Controls.Add(cards);
+            return column;
+        }
+
+        private void RouterRowPanel_Paint(object sender, PaintEventArgs e)
+        {
+            List<Control> routerCards = new List<Control>();
+            foreach (Control group in _routerRowPanel.Controls)
+            {
+                Control card = FindControlByTag(group, "router-card");
+                if (card != null)
+                    routerCards.Add(card);
+            }
+
+            if (routerCards.Count < 2)
+                return;
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen linePen = new Pen(Color.FromArgb(120, 90, 90, 90), 1.6f))
+            {
+                List<Point> topCenters = routerCards
+                    .Select(card => GetPointInParent(card, _routerRowPanel, new Point(card.Width / 2, 0)))
+                    .OrderBy(p => p.X)
+                    .ToList();
+
+                int lineY = Math.Max(6, topCenters.Min(p => p.Y) - 14);
+                e.Graphics.DrawLine(linePen, topCenters.First().X, lineY, topCenters.Last().X, lineY);
+
+                foreach (Point topCenter in topCenters)
+                    e.Graphics.DrawLine(linePen, topCenter.X, lineY, topCenter.X, topCenter.Y - 2);
+            }
+        }
+
+        private void RouterGroupPanel_Paint(object sender, PaintEventArgs e)
+        {
+            Control groupPanel = sender as Control;
+            if (groupPanel == null)
+                return;
+
+            Control routerCard = FindControlByTag(groupPanel, "router-card");
+            Control columnsRow = FindControlByTag(groupPanel, "columns-row");
+            if (routerCard == null || columnsRow == null)
+                return;
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen linePen = new Pen(Color.FromArgb(130, 70, 70, 70), 1.5f))
+            {
+                Point routerBottom = GetPointInParent(routerCard, groupPanel, new Point(routerCard.Width / 2, routerCard.Height));
+                int branchY = routerBottom.Y + 10;
+
+                List<Control> columns = columnsRow.Controls.Cast<Control>().ToList();
+                if (columns.Count == 0)
+                    return;
+
+                List<Point> columnTopCenters = columns
+                    .Select(c => GetPointInParent(c, groupPanel, new Point(c.Width / 2, 0)))
+                    .OrderBy(p => p.X)
+                    .ToList();
+
+                List<int> columnCenters = columnTopCenters.Select(p => p.X).ToList();
+                e.Graphics.DrawLine(linePen, routerBottom.X, routerBottom.Y, routerBottom.X, branchY);
+                e.Graphics.DrawLine(linePen, columnCenters.First(), branchY, columnCenters.Last(), branchY);
+
+                foreach (Control column in columns)
+                {
+                    FlowLayoutPanel cardsPanel = column.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+                    Control firstCardForCenter = cardsPanel != null && cardsPanel.Controls.Count > 0 ? cardsPanel.Controls[0] : null;
+
+                    int columnCenterX;
+                    Point columnTopCenter;
+                    if (firstCardForCenter != null)
+                    {
+                        columnTopCenter = GetPointInParent(firstCardForCenter, groupPanel, new Point(firstCardForCenter.Width / 2, 0));
+                        columnCenterX = columnTopCenter.X;
+                    }
+                    else
+                    {
+                        columnTopCenter = GetPointInParent(column, groupPanel, new Point(column.Width / 2, 0));
+                        columnCenterX = columnTopCenter.X;
+                    }
+
+                    e.Graphics.DrawLine(linePen, columnCenterX, branchY, columnCenterX, columnTopCenter.Y);
+
+                    Control snetLabel = FindControlByTag(column, "snet-label");
+                    if (snetLabel == null || cardsPanel == null || cardsPanel.Controls.Count == 0)
+                        continue;
+
+                    int downStartY = GetPointInParent(snetLabel, groupPanel, new Point(snetLabel.Width / 2, snetLabel.Height)).Y;
+                    Control firstCard = cardsPanel.Controls[0];
+                    Control lastCard = cardsPanel.Controls[cardsPanel.Controls.Count - 1];
+                    int firstCardY = GetPointInParent(firstCard, groupPanel, new Point(firstCard.Width / 2, 0)).Y;
+                    int lastCardBottomY = GetPointInParent(lastCard, groupPanel, new Point(lastCard.Width / 2, lastCard.Height)).Y;
+
+                    e.Graphics.DrawLine(linePen, columnCenterX, downStartY, columnCenterX, firstCardY - 3);
+                    e.Graphics.DrawLine(linePen, columnCenterX, firstCardY + 2, columnCenterX, lastCardBottomY - 2);
+
+                    foreach (Control card in cardsPanel.Controls)
+                    {
+                        Point cardCenter = GetPointInParent(card, groupPanel, new Point(card.Width / 2, card.Height / 2));
+                        Point cardLeft = GetPointInParent(card, groupPanel, new Point(0, card.Height / 2));
+                        e.Graphics.DrawLine(linePen, columnCenterX, cardCenter.Y, cardLeft.X + 2, cardCenter.Y);
+                    }
+                }
+            }
+        }
+
+        private static Control FindControlByTag(Control root, string tag)
+        {
+            if (root == null)
+                return null;
+
+            foreach (Control control in root.Controls)
+            {
+                string controlTag = control.Tag as string;
+                if (string.Equals(controlTag, tag, StringComparison.Ordinal))
+                    return control;
+
+                Control nested = FindControlByTag(control, tag);
+                if (nested != null)
+                    return nested;
+            }
+
+            return null;
+        }
+
+        private static Point GetCenterInParent(Control control, Control parent)
+        {
+            Point centerInScreen = control.PointToScreen(new Point(control.Width / 2, control.Height / 2));
+            return parent.PointToClient(centerInScreen);
+        }
+
+        private static Point GetPointInParent(Control control, Control parent, Point pointInControl)
+        {
+            Point pointInScreen = control.PointToScreen(pointInControl);
+            return parent.PointToClient(pointInScreen);
+        }
+
+        private static string GetRouterKeyAddress(BACnetDevice device)
+        {
+            if (device == null || device.BacAdr == null)
+                return "n/a";
+
+            string value = device.BacAdr.ToString();
+            return string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+        }
+
         private Control CreateRouterCard(BACnetDevice device, string macAddress, string snetText)
         {
             Panel card = new Panel
             {
-                Width = 170,
-                Height = 120,
+                Width = 92,
+                Height = 62,
                 BackColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
-                Margin = new Padding(8)
+                Margin = new Padding(5)
             };
 
-            Label macLabel = new Label
+            Label macTitleLabel = new Label
             {
                 Dock = DockStyle.Top,
-                Height = 34,
+                Height = 10,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 8.5F, FontStyle.Regular),
-                Text = "MAC: " + macAddress
+                Font = new Font("Segoe UI", 6.6F, FontStyle.Bold),
+                Text = "MAC"
+            };
+
+            Label macValueLabel = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 12,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 6.2F, FontStyle.Regular),
+                AutoEllipsis = true,
+                Text = macAddress
             };
 
             Panel deviceSymbol = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 38,
+                Height = 20,
                 Margin = new Padding(0),
                 BackColor = Color.FromArgb(68, 114, 196)
             };
@@ -156,7 +461,7 @@ namespace ShowNetworkNumbers
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 8.6F, FontStyle.Bold),
                 Text = device.deviceId.ToString()
             };
             deviceSymbol.Controls.Add(deviceText);
@@ -165,13 +470,14 @@ namespace ShowNetworkNumbers
             {
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular),
-                Padding = new Padding(4, 2, 4, 4),
+                Font = new Font("Segoe UI", 6.8F, FontStyle.Regular),
+                Padding = new Padding(2, 1, 2, 1),
                 Text = "SNET: " + snetText
             };
 
             card.Controls.Add(networkNumbersLabel);
-            card.Controls.Add(macLabel);
+            card.Controls.Add(macValueLabel);
+            card.Controls.Add(macTitleLabel);
             card.Controls.Add(deviceSymbol);
 
             return card;
@@ -583,6 +889,16 @@ namespace ShowNetworkNumbers
                 Value = value;
                 Source = source ?? string.Empty;
             }
+        }
+
+        private sealed class DeviceLayoutData
+        {
+            public BACnetDevice Device { get; set; }
+            public uint DeviceId { get; set; }
+            public string RouterKey { get; set; }
+            public string DisplayMac { get; set; }
+            public int? Snet { get; set; }
+            public string SnetText { get; set; }
         }
 
     }
