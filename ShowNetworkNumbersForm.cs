@@ -5,7 +5,6 @@ using System.Drawing.Drawing2D;
 using System.IO.BACnet;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Yabe;
@@ -15,12 +14,11 @@ namespace ShowNetworkNumbers
     public class ShowNetworkNumbersForm : Form
     {
         private readonly YabeMainDialog _yabeFrm;
+        private readonly Button _toggleAllButton;
         private readonly Button _refreshButton;
-        private readonly Button _debugButton;
         private readonly Panel _topPanel;
         private readonly Panel _diagramHostPanel;
         private readonly FlowLayoutPanel _routerRowPanel;
-        private string _lastDebugDump = string.Empty;
 
         public ShowNetworkNumbersForm(YabeMainDialog yabeFrm)
         {
@@ -31,21 +29,23 @@ namespace ShowNetworkNumbers
             Height = 560;
             StartPosition = FormStartPosition.CenterParent;
 
+            _toggleAllButton = new Button
+            {
+                Height = 30,
+                Width = 130,
+                Text = "Alle ausklappen",
+                FlatStyle = FlatStyle.System
+            };
+            _toggleAllButton.Click += (sender, args) => ToggleAllNetworkColumns();
+
             _refreshButton = new Button
             {
                 Height = 30,
                 Width = 110,
-                Text = "Refresh"
+                Text = "Refresh",
+                FlatStyle = FlatStyle.System
             };
             _refreshButton.Click += (sender, args) => LoadNetworks();
-
-            _debugButton = new Button
-            {
-                Height = 30,
-                Width = 150,
-                Text = "Debug anzeigen"
-            };
-            _debugButton.Click += (sender, args) => ShowDebugWindow();
 
             _topPanel = new Panel
             {
@@ -62,7 +62,7 @@ namespace ShowNetworkNumbers
                 FlowDirection = FlowDirection.LeftToRight
             };
             topButtons.Controls.Add(_refreshButton);
-            topButtons.Controls.Add(_debugButton);
+            topButtons.Controls.Add(_toggleAllButton);
             _topPanel.Controls.Add(topButtons);
 
             _diagramHostPanel = new Panel
@@ -117,8 +117,6 @@ namespace ShowNetworkNumbers
 
             _routerRowPanel.PerformLayout();
             _routerRowPanel.Invalidate();
-
-            _lastDebugDump = BuildDebugDump(devices);
 
             if (_routerRowPanel.Controls.Count == 0)
             {
@@ -240,18 +238,24 @@ namespace ShowNetworkNumbers
                 Padding = new Padding(0),
                 BackColor = Color.Transparent
             };
+            column.Tag = "snet-column";
 
-            Label titleLabel = new Label
+            Button toggleButton = new Button
             {
                 AutoSize = false,
                 Width = 102,
-                Height = 20,
+                Height = 22,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI", 8F, FontStyle.Bold),
                 Margin = new Padding(0, 0, 0, 2),
-                Text = "Netzwerk: " + title
+                FlatStyle = FlatStyle.Flat,
+                Text = "Netzwerk: " + title + "  [+]"
             };
-            titleLabel.Tag = "snet-label";
+            toggleButton.FlatAppearance.BorderColor = Color.FromArgb(160, 160, 160);
+            toggleButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(235, 235, 235);
+            toggleButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(245, 245, 245);
+            toggleButton.Tag = "snet-toggle";
+            toggleButton.AccessibleDescription = title;
 
             FlowLayoutPanel cards = new FlowLayoutPanel
             {
@@ -263,6 +267,8 @@ namespace ShowNetworkNumbers
                 Padding = new Padding(0),
                 BackColor = Color.Transparent
             };
+            cards.Tag = "snet-cards";
+            cards.Visible = false;
 
             foreach (DeviceLayoutData device in devices)
             {
@@ -271,9 +277,71 @@ namespace ShowNetworkNumbers
                 cards.Controls.Add(childCard);
             }
 
-            column.Controls.Add(titleLabel);
+            toggleButton.Click += (sender, args) =>
+            {
+                cards.Visible = !cards.Visible;
+                UpdateNetworkToggleButtonText(toggleButton, title, cards.Visible);
+                _routerRowPanel.PerformLayout();
+                _routerRowPanel.Invalidate();
+                if (column.Parent != null)
+                    column.Parent.Invalidate();
+                column.Invalidate();
+                UpdateGlobalToggleButtonText();
+            };
+
+            UpdateNetworkToggleButtonText(toggleButton, title, false);
+
+            column.Controls.Add(toggleButton);
             column.Controls.Add(cards);
             return column;
+        }
+
+        private void ToggleAllNetworkColumns()
+        {
+            List<Tuple<Button, FlowLayoutPanel>> toggles = GetNetworkTogglePairs().ToList();
+            if (toggles.Count == 0)
+                return;
+
+            bool expandAll = toggles.Any(p => !p.Item2.Visible);
+            foreach (Tuple<Button, FlowLayoutPanel> pair in toggles)
+            {
+                pair.Item2.Visible = expandAll;
+                string title = pair.Item1.AccessibleDescription ?? "n/a";
+                UpdateNetworkToggleButtonText(pair.Item1, title, expandAll);
+            }
+
+            _routerRowPanel.PerformLayout();
+            _routerRowPanel.Invalidate();
+            UpdateGlobalToggleButtonText();
+        }
+
+        private IEnumerable<Tuple<Button, FlowLayoutPanel>> GetNetworkTogglePairs()
+        {
+            foreach (Control column in FindControlsByTag(_routerRowPanel, "snet-column"))
+            {
+                Button toggle = FindControlByTag(column, "snet-toggle") as Button;
+                FlowLayoutPanel cards = FindControlByTag(column, "snet-cards") as FlowLayoutPanel;
+                if (toggle != null && cards != null)
+                    yield return Tuple.Create(toggle, cards);
+            }
+        }
+
+        private void UpdateGlobalToggleButtonText()
+        {
+            List<Tuple<Button, FlowLayoutPanel>> toggles = GetNetworkTogglePairs().ToList();
+            if (toggles.Count == 0)
+            {
+                _toggleAllButton.Text = "Alle ausklappen";
+                return;
+            }
+
+            bool hasCollapsed = toggles.Any(p => !p.Item2.Visible);
+            _toggleAllButton.Text = hasCollapsed ? "Alle ausklappen" : "Alle einklappen";
+        }
+
+        private static void UpdateNetworkToggleButtonText(Button button, string title, bool expanded)
+        {
+            button.Text = "Netzwerk: " + title + (expanded ? "  [-]" : "  [+]");
         }
 
         private void RouterRowPanel_Paint(object sender, PaintEventArgs e)
@@ -338,13 +406,13 @@ namespace ShowNetworkNumbers
                 foreach (Control column in columns)
                 {
                     FlowLayoutPanel cardsPanel = column.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
-                    Control firstCardForCenter = cardsPanel != null && cardsPanel.Controls.Count > 0 ? cardsPanel.Controls[0] : null;
+                    Control toggleControl = FindControlByTag(column, "snet-toggle");
 
                     int columnCenterX;
                     Point columnTopCenter;
-                    if (firstCardForCenter != null)
+                    if (toggleControl != null)
                     {
-                        columnTopCenter = GetPointInParent(firstCardForCenter, groupPanel, new Point(firstCardForCenter.Width / 2, 0));
+                        columnTopCenter = GetPointInParent(toggleControl, groupPanel, new Point(toggleControl.Width / 2, 0));
                         columnCenterX = columnTopCenter.X;
                     }
                     else
@@ -355,11 +423,10 @@ namespace ShowNetworkNumbers
 
                     e.Graphics.DrawLine(linePen, columnCenterX, branchY, columnCenterX, columnTopCenter.Y);
 
-                    Control snetLabel = FindControlByTag(column, "snet-label");
-                    if (snetLabel == null || cardsPanel == null || cardsPanel.Controls.Count == 0)
+                    if (toggleControl == null || cardsPanel == null || !cardsPanel.Visible || cardsPanel.Controls.Count == 0)
                         continue;
 
-                    int downStartY = GetPointInParent(snetLabel, groupPanel, new Point(snetLabel.Width / 2, snetLabel.Height)).Y;
+                    int downStartY = GetPointInParent(toggleControl, groupPanel, new Point(toggleControl.Width / 2, toggleControl.Height)).Y;
                     Control firstCard = cardsPanel.Controls[0];
                     Control lastCard = cardsPanel.Controls[cardsPanel.Controls.Count - 1];
                     int firstCardY = GetPointInParent(firstCard, groupPanel, new Point(firstCard.Width / 2, 0)).Y;
@@ -395,6 +462,22 @@ namespace ShowNetworkNumbers
             }
 
             return null;
+        }
+
+        private static IEnumerable<Control> FindControlsByTag(Control root, string tag)
+        {
+            if (root == null)
+                yield break;
+
+            foreach (Control control in root.Controls)
+            {
+                string controlTag = control.Tag as string;
+                if (string.Equals(controlTag, tag, StringComparison.Ordinal))
+                    yield return control;
+
+                foreach (Control nested in FindControlsByTag(control, tag))
+                    yield return nested;
+            }
         }
 
         private static Point GetCenterInParent(Control control, Control parent)
@@ -696,187 +779,6 @@ namespace ShowNetworkNumbers
                 return null;
 
             return parsed >= 0 && parsed <= ushort.MaxValue ? (int?)parsed : null;
-        }
-
-        private void ShowDebugWindow()
-        {
-            Form debugForm = new Form
-            {
-                Text = "ShowNetworkNumbers Debug",
-                Width = 980,
-                Height = 620,
-                StartPosition = FormStartPosition.CenterParent
-            };
-
-            TextBox debugText = new TextBox
-            {
-                Dock = DockStyle.Fill,
-                Multiline = true,
-                ScrollBars = ScrollBars.Both,
-                ReadOnly = true,
-                WordWrap = false,
-                Font = new Font("Consolas", 9F, FontStyle.Regular),
-                Text = string.IsNullOrWhiteSpace(_lastDebugDump) ? "Keine Debugdaten. Bitte zuerst Refresh ausfuehren." : _lastDebugDump
-            };
-
-            Button copyButton = new Button
-            {
-                Dock = DockStyle.Bottom,
-                Height = 32,
-                Text = "In Zwischenablage kopieren"
-            };
-            copyButton.Click += (sender, args) =>
-            {
-                Clipboard.SetText(debugText.Text ?? string.Empty);
-                MessageBox.Show(debugForm, "Debugtext wurde kopiert.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            };
-
-            debugForm.Controls.Add(debugText);
-            debugForm.Controls.Add(copyButton);
-            debugForm.Show(this);
-        }
-
-        private string BuildDebugDump(IEnumerable<BACnetDevice> devices)
-        {
-            StringBuilder sb = new StringBuilder();
-            List<BACnetDevice> list = devices != null ? devices.ToList() : new List<BACnetDevice>();
-
-            sb.AppendLine("ShowNetworkNumbers Debug Dump");
-            sb.AppendLine("Timestamp: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-            sb.AppendLine("Anzahl Geraete: " + list.Count);
-            sb.AppendLine(new string('-', 80));
-
-            foreach (BACnetDevice device in list)
-            {
-                string macAddress = GetMacAddress(device);
-                object address = device != null ? device.BacAdr : null;
-                SnetResolution snet = ResolveSnet(device, macAddress);
-
-                sb.AppendLine("DeviceId: " + (device != null ? device.deviceId.ToString() : "n/a"));
-                sb.AppendLine("BacAdr.ToString: " + macAddress);
-                sb.AppendLine("SNET resolved: " + (snet.Value.HasValue ? snet.Value.Value.ToString() : "n/a"));
-                sb.AppendLine("SNET source: " + snet.Source);
-                sb.AppendLine("Address type: " + (address != null ? address.GetType().FullName : "null"));
-
-                BacnetAddress bacAddress = address as BacnetAddress;
-                if (bacAddress != null)
-                {
-                    sb.AppendLine("BacAdr.net: " + bacAddress.net);
-                    sb.AppendLine("BacAdr.type: " + bacAddress.type);
-                    sb.AppendLine("BacAdr.adr (hex): " + FormatByteArray(bacAddress.adr));
-                    sb.AppendLine("BacAdr.VMac (hex): " + FormatByteArray(bacAddress.VMac));
-                    sb.AppendLine("BacAdr.RoutedSource: " + (bacAddress.RoutedSource != null ? bacAddress.RoutedSource.ToString() : "<null>"));
-                    if (bacAddress.RoutedSource != null)
-                    {
-                        sb.AppendLine("BacAdr.RoutedSource.net: " + bacAddress.RoutedSource.net);
-                        sb.AppendLine("BacAdr.RoutedSource.type: " + bacAddress.RoutedSource.type);
-                        sb.AppendLine("BacAdr.RoutedSource.adr (hex): " + FormatByteArray(bacAddress.RoutedSource.adr));
-                        sb.AppendLine("BacAdr.RoutedSource.VMac (hex): " + FormatByteArray(bacAddress.RoutedSource.VMac));
-                    }
-                }
-
-                foreach (string line in DescribeAddressMembers(address))
-                    sb.AppendLine("  " + line);
-
-                sb.AppendLine(new string('-', 80));
-            }
-
-            return sb.ToString();
-        }
-
-        private static IEnumerable<string> DescribeAddressMembers(object address)
-        {
-            if (address == null)
-                yield break;
-
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            Type addressType = address.GetType();
-            HashSet<string> emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (PropertyInfo property in addressType.GetProperties(flags).OrderBy(p => p.Name))
-            {
-                if (!property.CanRead || property.GetIndexParameters().Length != 0)
-                    continue;
-
-                string name = property.Name ?? string.Empty;
-                if (!ContainsDebugKeyword(name) || !emitted.Add("P:" + name))
-                    continue;
-
-                object rawValue = null;
-                string error = null;
-                try
-                {
-                    rawValue = property.GetValue(address, null);
-                }
-                catch (Exception ex)
-                {
-                    error = ex.GetType().Name;
-                }
-
-                if (!string.IsNullOrEmpty(error))
-                    yield return "property " + name + " = <error: " + error + ">";
-                else
-                    yield return "property " + name + " = " + SafeToString(rawValue);
-            }
-
-            foreach (FieldInfo field in addressType.GetFields(flags).OrderBy(f => f.Name))
-            {
-                string name = field.Name ?? string.Empty;
-                if (!ContainsDebugKeyword(name) || !emitted.Add("F:" + name))
-                    continue;
-
-                object rawValue = null;
-                string error = null;
-                try
-                {
-                    rawValue = field.GetValue(address);
-                }
-                catch (Exception ex)
-                {
-                    error = ex.GetType().Name;
-                }
-
-                if (!string.IsNullOrEmpty(error))
-                    yield return "field " + name + " = <error: " + error + ">";
-                else
-                    yield return "field " + name + " = " + SafeToString(rawValue);
-            }
-        }
-
-        private static bool ContainsDebugKeyword(string memberName)
-        {
-            string name = (memberName ?? string.Empty).ToLowerInvariant();
-            return name.Contains("net") || name.Contains("source") || name.Contains("adr") || name.Contains("mac");
-        }
-
-        private static string SafeToString(object value)
-        {
-            if (value == null)
-                return "<null>";
-
-            byte[] bytes = value as byte[];
-            if (bytes != null)
-                return FormatByteArray(bytes);
-
-            try
-            {
-                return value.ToString();
-            }
-            catch (Exception ex)
-            {
-                return "<error: " + ex.GetType().Name + ">";
-            }
-        }
-
-        private static string FormatByteArray(byte[] bytes)
-        {
-            if (bytes == null)
-                return "<null>";
-
-            if (bytes.Length == 0)
-                return "<empty>";
-
-            return string.Join("-", bytes.Select(b => b.ToString("X2")));
         }
 
         private struct SnetResolution
