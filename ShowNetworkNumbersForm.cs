@@ -16,6 +16,7 @@ namespace ShowNetworkNumbers
         private readonly YabeMainDialog _yabeFrm;
         private readonly Button _toggleAllButton;
         private readonly Button _refreshButton;
+        private readonly Button _helpButton;
         private readonly Panel _topPanel;
         private readonly Panel _diagramHostPanel;
         private readonly FlowLayoutPanel _routerRowPanel;
@@ -47,6 +48,20 @@ namespace ShowNetworkNumbers
             };
             _refreshButton.Click += (sender, args) => LoadNetworks();
 
+            _helpButton = new Button
+            {
+                Height = 30,
+                Width = 90,
+                Text = "Hilfe",
+                FlatStyle = FlatStyle.System,
+                Dock = DockStyle.Right
+            };
+            _helpButton.Click += (sender, args) =>
+            {
+                HelpForm helpForm = new HelpForm();
+                helpForm.Show(this);
+            };
+
             _topPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -64,6 +79,7 @@ namespace ShowNetworkNumbers
             topButtons.Controls.Add(_refreshButton);
             topButtons.Controls.Add(_toggleAllButton);
             _topPanel.Controls.Add(topButtons);
+            _topPanel.Controls.Add(_helpButton);
 
             _diagramHostPanel = new Panel
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows.Forms;
 using Yabe;
 
@@ -26,6 +27,17 @@ namespace ShowNetworkNumbers
         {
             try
             {
+                if (_yabeFrm == null || _yabeFrm.YabeDiscoveredDevices == null || !_yabeFrm.YabeDiscoveredDevices.Any())
+                {
+                    MessageBox.Show(
+                        _yabeFrm,
+                        "Bitte zuerst BACnet-Geraete in Yabe suchen. Das Plugin wird erst mit gefundenen Geraeten geoeffnet.",
+                        "ShowNetworkNumbers",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
                 Trace.WriteLine("Loading ShowNetworkNumbers window...");
                 ShowNetworkNumbersForm form = new ShowNetworkNumbersForm(_yabeFrm);
                 form.Show();
