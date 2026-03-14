@@ -2,6 +2,10 @@
 
 Ein Yabe-Plugin zur visuellen Darstellung der BACnet-Netzwerktopologie. Es zeigt alle entdeckten Geräte gruppiert nach Router und Subnetzwerk (SNET) in einem interaktiven Diagramm.
 
+## Screenshot
+
+![Screenshot des ShowNetworkNumbers Plugins](Bilder/Screenshot.png)
+
 ## Funktionalität
 
 Das Plugin liest die von Yabe entdeckten BACnet-Geräte aus und stellt sie als Baumstruktur dar:
