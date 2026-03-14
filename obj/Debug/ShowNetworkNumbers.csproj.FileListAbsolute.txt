@@ -1,0 +1,6 @@
+D:\github\VisualStudio\yetanotherbacnetexplorer-code-r596-trunk\Yabe\bin\Debug\Plugins\ShowNetworkNumbers.dll
+D:\github\VisualStudio\yetanotherbacnetexplorer-code-r596-trunk\Yabe\bin\Debug\Plugins\ShowNetworkNumbers.pdb
+D:\github\VisualStudio\yetanotherbacnetexplorer-code-r596-trunk\YabePlugins\ShowNetworkNumbers\obj\Debug\ShowNetworkNumbers.csproj.AssemblyReference.cache
+D:\github\VisualStudio\yetanotherbacnetexplorer-code-r596-trunk\YabePlugins\ShowNetworkNumbers\obj\Debug\ShowNetworkNumbers.csproj.CoreCompileInputs.cache
+D:\github\VisualStudio\yetanotherbacnetexplorer-code-r596-trunk\YabePlugins\ShowNetworkNumbers\obj\Debug\ShowNetworkNumbers.dll
+D:\github\VisualStudio\yetanotherbacnetexplorer-code-r596-trunk\YabePlugins\ShowNetworkNumbers\obj\Debug\ShowNetworkNumbers.pdb
