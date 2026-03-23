@@ -88,19 +88,24 @@ namespace ShowNetworkNumbers
                 AutoScroll = true,
                 Padding = new Padding(20)
             };
+            _diagramHostPanel.Resize += (sender, args) => UpdateDiagramScrollArea();
 
             _routerRowPanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.Top,
-                Height = 430,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
                 BackColor = Color.Transparent,
-                Padding = new Padding(4)
+                Padding = new Padding(4),
+                Location = new Point(20, 20)
             };
             _routerRowPanel.Paint += RouterRowPanel_Paint;
-            _routerRowPanel.Resize += (sender, args) => _routerRowPanel.Invalidate();
+            _routerRowPanel.Resize += (sender, args) =>
+            {
+                _routerRowPanel.Invalidate();
+                UpdateDiagramScrollArea();
+            };
 
             _diagramHostPanel.Controls.Add(_routerRowPanel);
 
@@ -145,6 +150,8 @@ namespace ShowNetworkNumbers
                 };
                 _routerRowPanel.Controls.Add(empty);
             }
+
+            UpdateDiagramScrollArea();
         }
 
         private DeviceLayoutData CreateDeviceLayoutData(BACnetDevice device)
@@ -302,6 +309,7 @@ namespace ShowNetworkNumbers
                 if (column.Parent != null)
                     column.Parent.Invalidate();
                 column.Invalidate();
+                UpdateDiagramScrollArea();
                 UpdateGlobalToggleButtonText();
             };
 
@@ -328,7 +336,19 @@ namespace ShowNetworkNumbers
 
             _routerRowPanel.PerformLayout();
             _routerRowPanel.Invalidate();
+            UpdateDiagramScrollArea();
             UpdateGlobalToggleButtonText();
+        }
+
+        private void UpdateDiagramScrollArea()
+        {
+            if (_diagramHostPanel == null || _routerRowPanel == null)
+                return;
+
+            Size preferredSize = _routerRowPanel.PreferredSize;
+            _diagramHostPanel.AutoScrollMinSize = new Size(
+                preferredSize.Width + _diagramHostPanel.Padding.Horizontal,
+                preferredSize.Height + _diagramHostPanel.Padding.Vertical);
         }
 
         private IEnumerable<Tuple<Button, FlowLayoutPanel>> GetNetworkTogglePairs()
